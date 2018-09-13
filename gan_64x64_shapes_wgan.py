@@ -33,9 +33,14 @@ DIM = 64 # Model dimensionality
 CRITIC_ITERS = 5 # How many iterations to train the critic for
 N_GPUS = 2 # Number of GPUs
 BATCH_SIZE = 64 # Batch size. Must be a multiple of N_GPUS
-ITERS = 20000 # How many iterations to train for
+ITERS = 25000 # How many iterations to train for
 LAMBDA = 10 # Gradient penalty lambda hyperparameter
 OUTPUT_DIM = 64*64*3 # Number of pixels in each iamge
+OUTPUT_DIR = './results-shapes-'+MODE
+
+if not os.path.isdir(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
+
 
 lib.print_model_settings(locals().copy())
 
@@ -473,7 +478,7 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
         split_real_data_conv = tf.split(0, len(DEVICES), all_real_data_conv)
     gen_costs, disc_costs = [],[]
 
-    print '>>>>>>>>>>> Loop #1...'
+    print '>>>>>>>>>>> Define Generator and Discriminator...'
     for device_index, (device, real_data_conv) in enumerate(zip(DEVICES, split_real_data_conv)):
         with tf.device(device):
 
@@ -575,11 +580,12 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
         all_fixed_noise_samples = tf.concat(all_fixed_noise_samples, axis=0)
     else:
         all_fixed_noise_samples = tf.concat(0, all_fixed_noise_samples)
+
     def generate_image(iteration):
         samples = session.run(all_fixed_noise_samples)
         samples = ((samples+1.)*(255.99/2)).astype('int32')
         print 'Generated images ', samples.shape, ' - saving...'
-        lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), 'Shapes_samples_{}.png'.format(iteration))
+        lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), OUTPUT_DIR + '/samples_{}.png'.format(iteration))
 
 
     # Dataset iterator
@@ -588,19 +594,20 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
 
     def inf_train_gen():
         while True:
-            for (images,) in train_gen():
+            for (images, latent_params) in train_gen():
                 yield images
+
+    saver = tf.train.Saver()
+    snapshot_folder = OUTPUT_DIR + '/model'
+    if not os.path.isdir(snapshot_folder):
+        os.makedirs(snapshot_folder)
 
     # Save a batch of ground-truth samples
     _x = inf_train_gen().next()
     _x_r = session.run(real_data, feed_dict={real_data_conv: _x[:BATCH_SIZE/N_GPUS]})
     _x_r = ((_x_r+1.)*(255.99/2)).astype('int32')
-    lib.save_images.save_images(_x_r.reshape((BATCH_SIZE/N_GPUS, 3, 64, 64)), 'samples_groundtruth.png')
+    lib.save_images.save_images(_x_r.reshape((BATCH_SIZE/N_GPUS, 3, 64, 64)), OUTPUT_DIR + '/samples_groundtruth.png')
 
-    saver = tf.train.Saver()
-    snapshot_folder = './' + MODE + '_Shapes_model'
-    if not os.path.isdir(snapshot_folder):
-        os.makedirs(snapshot_folder)
 
     # Train loop
     session.run(tf.initialize_all_variables())
@@ -635,7 +642,7 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
         if iteration % 200 == 199:
             t = time.time()
             dev_disc_costs = []
-            for (images,) in dev_gen():
+            for (images, latent_params) in dev_gen():
                 _dev_disc_cost = session.run(disc_cost, feed_dict={all_real_data_conv: images}) 
                 dev_disc_costs.append(_dev_disc_cost)
             lib.plot.plot('dev disc cost', np.mean(dev_disc_costs))
@@ -643,7 +650,6 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
             generate_image(iteration)
 
             saver.save(session, snapshot_folder + '/model.ckpt')
-
 
         if (iteration < 5) or (iteration % 200 == 199):
             lib.plot.flush()
