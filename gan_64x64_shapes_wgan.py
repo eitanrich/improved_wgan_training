@@ -19,14 +19,19 @@ import tflib.save_images
 import tflib.image_dir_dataset_loader
 import tflib.ops.layernorm
 import tflib.plot
+from scipy.misc import imsave
 
 # Download 64x64 ImageNet at http://image-net.org/small/download.php and
 # fill in the path to the extracted files here!
 # DATA_DIR = '/cs/labs/yweiss/eitanrich/Datasets/CelebA/'
 DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-2018-09-06-10-21'
+# DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-fixed-4-2018-09-16-15-48'
 if len(DATA_DIR) == 0:
     raise Exception('Please specify path to data directory in gan_64x64.py!')
 
+GENERATE = False
+INTERPOLATE = True
+SAMPLES_TO_GENERATE = 10000
 MODE = 'wgan-gp' # dcgan, wgan, wgan-gp, lsgan
 LATENT_DIM = 10
 DIM = 64 # Model dimensionality
@@ -37,6 +42,7 @@ ITERS = 25000 # How many iterations to train for
 LAMBDA = 10 # Gradient penalty lambda hyperparameter
 OUTPUT_DIM = 64*64*3 # Number of pixels in each iamge
 OUTPUT_DIR = './results-shapes-'+MODE
+# OUTPUT_DIR = './results-shapes-64-1-fixed-4-2018-09-16-15-48-'+MODE
 
 if not os.path.isdir(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
@@ -569,6 +575,57 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
     else:
         raise Exception()
 
+    saver = tf.train.Saver()
+    snapshot_folder = OUTPUT_DIR + '/model'
+    if not os.path.isdir(snapshot_folder):
+        os.makedirs(snapshot_folder)
+
+    if GENERATE:
+        session.run(tf.initialize_all_variables())
+        saver.restore(session, snapshot_folder + '/model.ckpt')
+        tf_samples = Generator(BATCH_SIZE)
+
+        def generate_samples():
+            samples = session.run(tf_samples)
+            return (samples+1.)*(255.99/2)
+
+        out_folder = OUTPUT_DIR + '/generated'
+        if not os.path.isdir(out_folder):
+            os.makedirs(out_folder)
+
+        idx = 0
+        for i in range((SAMPLES_TO_GENERATE+BATCH_SIZE-1)//BATCH_SIZE):
+            print 'Generating batch', i
+            samples = generate_samples()
+            for j in range(samples.shape[0]):
+                img = samples[j, ...].reshape([3, 64, 64]).transpose([1, 2, 0])
+                imsave(os.path.join(out_folder, '{}.png'.format(idx)), img)
+                idx += 1
+        exit()
+
+    if INTERPOLATE:
+        session.run(tf.initialize_all_variables())
+        saver.restore(session, snapshot_folder + '/model.ckpt')
+
+        tf_latent_params = tf.placeholder(tf.float32, [BATCH_SIZE, LATENT_DIM])
+        tf_samples = Generator(BATCH_SIZE, tf_latent_params)
+
+        def generate_samples(latent_params):
+            samples = session.run(tf_samples, feed_dict={tf_latent_params: latent_params})
+            return ((samples+1.)*(255.99/2)).astype('int32')
+
+        out_folder = OUTPUT_DIR + '/interpolation'
+        if not os.path.isdir(out_folder):
+            os.makedirs(out_folder)
+
+        for i in range(LATENT_DIM):
+            print 'Interpolating latent parameter', i
+            latent_params = np.zeros([BATCH_SIZE, LATENT_DIM])
+            latent_params[:, i] = np.arange(-5.0, 4.99, 10.0/BATCH_SIZE)
+            samples = generate_samples(latent_params)
+            lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), out_folder + '/interpolate_param_{}.png'.format(i))
+        exit()
+
     print '>>>>>>>>>>> For generating samples...'
     # For generating samples
     fixed_noise = tf.constant(np.random.normal(size=(BATCH_SIZE, LATENT_DIM)).astype('float32'))
@@ -597,17 +654,11 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
             for (images, latent_params) in train_gen():
                 yield images
 
-    saver = tf.train.Saver()
-    snapshot_folder = OUTPUT_DIR + '/model'
-    if not os.path.isdir(snapshot_folder):
-        os.makedirs(snapshot_folder)
-
     # Save a batch of ground-truth samples
     _x = inf_train_gen().next()
     _x_r = session.run(real_data, feed_dict={real_data_conv: _x[:BATCH_SIZE/N_GPUS]})
     _x_r = ((_x_r+1.)*(255.99/2)).astype('int32')
     lib.save_images.save_images(_x_r.reshape((BATCH_SIZE/N_GPUS, 3, 64, 64)), OUTPUT_DIR + '/samples_groundtruth.png')
-
 
     # Train loop
     session.run(tf.initialize_all_variables())

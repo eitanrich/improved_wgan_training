@@ -5,7 +5,7 @@ import time
 import functools
 import numpy as np
 import tensorflow as tf
-from tensorflow.contrib.framework import list_variables
+# from tensorflow.contrib.framework import list_variables
 import sklearn.datasets
 import tflib as lib
 import tflib.ops.linear
@@ -20,16 +20,21 @@ import tflib.ops.layernorm
 # import tflib.plot
 from matplotlib import pyplot as plt
 
-DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-2018-09-06-10-21'
+# DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-2018-09-06-10-21'
+# DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-fixed-4-2018-09-16-15-48'
+# DATA_DIR = 'results-shapes-wgan-gp/generated'
+DATA_DIR = 'results-shapes-64-1-fixed-4-2018-09-16-15-48-wgan-gp/generated'
 if len(DATA_DIR) == 0:
     raise Exception('Please specify path to data directory in gan_64x64.py!')
 
-MODE = 'l1' # dcgan, wgan, wgan-gp, lsgan
+MODE = 'wgan-gp' # dcgan, wgan, wgan-gp, lsgan
 LATENT_DIM = 10
 DIM = 64 # Model dimensionality
 BATCH_SIZE = 128 # Batch size. Must be a multiple of N_GPUS
-ITERS = 500 # How many iterations to train for
+ITERS = 400 # How many iterations to train for
 OUTPUT_DIM = 64*64*3 # Number of pixels in each iamge
+OUTPUT_DIR = './results-shapes-rendernet'
+MAX_SAMPLES = 10000
 
 lib.print_model_settings(locals().copy())
 
@@ -152,46 +157,36 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
         render_cost = tf.losses.absolute_difference(real_data, rendered_data)
 
     # rendernet_inverse_op = tf.train.AdamOptimizer(learning_rate=1e-1, beta1=0., beta2=0.9).minimize(render_cost, var_list=[latent_params])
-    rendernet_optimizer = tf.train.AdamOptimizer(learning_rate=0.25, name='Optimizer')
+    rendernet_optimizer = tf.train.AdamOptimizer(learning_rate=0.3, name='Optimizer')
     rendernet_inverse_op = rendernet_optimizer.minimize(render_cost, var_list=[latent_params])
     # rendernet_inverse_op = tf.train.RMSPropOptimizer(learning_rate=0.1).minimize(render_cost, var_list=[latent_params])
     reset_optimizer_op = tf.variables_initializer(rendernet_optimizer.variables())
 
-    # data_assign_op = real_data_conv.assign(new_images)
-
-    print('>>>>>>>>>>> For generating samples...')
-    def generate_image(iteration):
-        # samples = session.run(all_fixed_noise_samples)
-        samples = session.run(rendered_data)
-        samples = ((samples+1.)*(255.99/2)).astype('int32')
-        print('Generated images ', samples.shape, ' - saving...')
-        lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), 'Inverse_RenderNet_Shapes_samples_{}.png'.format(iteration))
-
-
     # Dataset iterator
-    train_gen, dev_gen = lib.image_dir_dataset_loader.load(BATCH_SIZE, data_dir=DATA_DIR, shuffle=False)
+    # train_gen, dev_gen = lib.image_dir_dataset_loader.load(BATCH_SIZE, data_dir=DATA_DIR)
+    train_gen, dev_gen = lib.image_dir_dataset_loader.load_single_set(BATCH_SIZE, data_dir=DATA_DIR)
     def single_epoch_train_gen():
         for (images, latent_params) in train_gen():
             yield images, latent_params
 
     print('>>>>>>>>>>> Restoring session ...')
-    snapshot_folder = './RenderNet_Shapes_model'
-    var_desc = list_variables(snapshot_folder)
+    snapshot_folder = OUTPUT_DIR + '/model'
+    # var_desc = list_variables(snapshot_folder)
     # var_list = [v[0] for v in var_desc]
     var_list=lib.params_with_name('Generator')
-    print(var_list)
     saver = tf.train.Saver(var_list=var_list)
 
-    # Train loop
     session.run(tf.initialize_all_variables())
     saver.restore(session, snapshot_folder + '/model.ckpt')
 
-    print('>>>>>>>>>>> Train loop ...')
+    print('>>>>>>>>>>> Main loop ...')
     gen = single_epoch_train_gen()
 
     start_time = time.time()
+    all_found_latent_params = []
+    batch_num = 0
     for _images, _latent_params in gen:
-        print('Batch...', np.sum(_latent_params))
+        print('Images {} - {}...'.format(batch_num * BATCH_SIZE, (batch_num+1) * BATCH_SIZE - 1))
         # _ = session.run(RenderNet, feed_dict={real_data_conv: _images})
         real_data_conv.load(_images, session)
         latent_params.load(np.zeros([BATCH_SIZE, LATENT_DIM], dtype=np.float32))
@@ -201,15 +196,23 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
         all_mean_z_diff = []
         for iteration in xrange(ITERS):
             z_found, _ = session.run([latent_params, rendernet_inverse_op])
-            mean_z_diff = np.mean(np.abs(_latent_params - z_found))
-            all_mean_z_diff.append(mean_z_diff)
+            if _latent_params.size > 0:
+                mean_z_diff = np.mean(np.abs(_latent_params - z_found))
+                all_mean_z_diff.append(mean_z_diff)
 
-            # if iteration % 10 == 0:
-            #     print(iteration)
-            #     generate_image(iteration)
-
-        print('Final mean z diff:', all_mean_z_diff[-1])
-        plt.plot(all_mean_z_diff)
-        plt.grid(True)
-        plt.pause(0.1)
-plt.show()
+        all_found_latent_params.append(z_found)
+        if all_mean_z_diff:
+            print('Final mean z diff:', all_mean_z_diff[-1])
+            plt.plot(all_mean_z_diff)
+            plt.grid(True)
+            plt.pause(0.1)
+        batch_num += 1
+        if batch_num*BATCH_SIZE > MAX_SAMPLES:
+            break
+    found_latent_params = np.vstack(tuple(all_found_latent_params))
+print('>>>>>>>>>>> Saving results ...')
+# np.save(OUTPUT_DIR + '/found_latent_params.npy', found_latent_params)
+np.save(OUTPUT_DIR + '/wgan_gp_found_latent_params-for-64-1-fixed-4-2018-09-16-15-48.npy', found_latent_params)
+print('>>>>>>>>>>> Done')
+if all_mean_z_diff:
+    plt.show()

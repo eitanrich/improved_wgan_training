@@ -22,6 +22,7 @@ DATA_DIR = '/cs/usr/eitanrich/phd-work-local/Datasets/NormalShapes/64-1-2018-09-
 if len(DATA_DIR) == 0:
     raise Exception('Please specify path to data directory in gan_64x64.py!')
 
+INTERPOLATE = True
 MODE = 'l1' # dcgan, wgan, wgan-gp, lsgan
 LATENT_DIM = 10
 DIM = 64 # Model dimensionality
@@ -29,6 +30,10 @@ N_GPUS = 1 # Number of GPUs
 BATCH_SIZE = 64 # Batch size. Must be a multiple of N_GPUS
 ITERS = 20000 # How many iterations to train for
 OUTPUT_DIM = 64*64*3 # Number of pixels in each iamge
+OUTPUT_DIR = './results-shapes-rendernet-2'
+
+if not os.path.isdir(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
 
 lib.print_model_settings(locals().copy())
 
@@ -167,21 +172,41 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
     rendernet_train_op = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0., beta2=0.9).minimize(render_cost,
                                       var_list=lib.params_with_name('Generator'), colocate_gradients_with_ops=True)
 
+    saver = tf.train.Saver()
+    snapshot_folder = OUTPUT_DIR + '/model'
+    if not os.path.isdir(snapshot_folder):
+        os.makedirs(snapshot_folder)
+
+    if INTERPOLATE:
+        session.run(tf.initialize_all_variables())
+        saver.restore(session, snapshot_folder + '/model.ckpt')
+
+        tf_latent_params = tf.placeholder(tf.float32, [BATCH_SIZE, LATENT_DIM])
+        tf_samples = RenderNet(BATCH_SIZE, latent_params=tf_latent_params)
+
+        def generate_samples(latent_params):
+            samples = session.run(tf_samples, feed_dict={tf_latent_params: latent_params})
+            return ((samples+1.)*(255.99/2)).astype('int32')
+
+        out_folder = OUTPUT_DIR + '/interpolation'
+        if not os.path.isdir(out_folder):
+            os.makedirs(out_folder)
+
+        for i in range(LATENT_DIM):
+            print 'Interpolating latent parameter', i
+            latent_params = np.load('foo.npy')
+            latent_params[:, i] = np.arange(-5.0, 4.99, 10.0/BATCH_SIZE)
+            samples = generate_samples(latent_params)
+            lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), out_folder + '/interpolate_param_{}.png'.format(i))
+        exit()
 
     print('>>>>>>>>>>> For generating samples...')
-    # For generating samples
-    # fixed_latent_params = tf.constant(np.random.normal(size=(BATCH_SIZE, LATENT_DIM)).astype('float32'))
-    # all_fixed_noise_samples = []
-    # for device_index, device in enumerate(DEVICES):
-    #     n_samples = BATCH_SIZE / len(DEVICES)
-    #     all_fixed_noise_samples.append(RenderNet(n_samples, latent_params=fixed_latent_params[device_index*n_samples:(device_index+1)*n_samples]))
-    # all_fixed_noise_samples = tf.concat(all_fixed_noise_samples, axis=0)
     def generate_image(iteration):
         # samples = session.run(all_fixed_noise_samples)
-        samples = session.run(rendered_data, feed_dict={all_real_data_conv: _images, all_real_data_latent_params: _latent_params})
+        samples = session.run(rendered_data, feed_dict={all_real_data_latent_params: _latent_params})
         samples = ((samples+1.)*(255.99/2)).astype('int32')
         print('Generated images ', samples.shape, ' - saving...')
-        lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), 'RenderNet_Shapes_samples_{}.png'.format(iteration))
+        lib.save_images.save_images(samples.reshape((BATCH_SIZE, 3, 64, 64)), OUTPUT_DIR + '/new_samples_{}.png'.format(iteration))
 
 
     # Dataset iterator
@@ -193,16 +218,11 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
             for (images, latent_params) in train_gen():
                 yield images, latent_params
 
-    saver = tf.train.Saver()
-    snapshot_folder = './RenderNet_Shapes_model'
-    if not os.path.isdir(snapshot_folder):
-        os.makedirs(snapshot_folder)
-
     # Train loop
     session.run(tf.initialize_all_variables())
 
-    # print '>>>>>>>>>>> Restoring session ...'
-    # saver.restore(session, snapshot_folder + '/model.ckpt')
+    print '>>>>>>>>>>> Restoring session ...'
+    saver.restore(session, snapshot_folder + '/model.ckpt')
 
     print('>>>>>>>>>>> Train loop ...')
     gen = inf_train_gen()
@@ -212,11 +232,11 @@ with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as session:
 
         # Train generator
         _images, _latent_params = gen.next()
-        _ = session.run(rendernet_train_op, feed_dict={all_real_data_conv: _images, all_real_data_latent_params: _latent_params})
+        # _ = session.run(rendernet_train_op, feed_dict={all_real_data_conv: _images, all_real_data_latent_params: _latent_params})
 
         if iteration % 200 == 0:
             # if iteration == 0:
             #     tf.assign(fixed_latent_params, _latent_params)
             print(iteration)
             generate_image(iteration)
-            saver.save(session, snapshot_folder + '/model.ckpt')
+            # saver.save(session, snapshot_folder + '/model.ckpt')

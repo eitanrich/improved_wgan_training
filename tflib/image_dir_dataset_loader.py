@@ -10,7 +10,11 @@ def make_generator(path, batch_size, shuffle):
         n_files = len([name for name in os.listdir(path) if name.endswith('.png') or name.endswith('.jpg') or name.endswith('.jpeg')])
         print('Loader for ', path, ': ', n_files, 'files')
         path_suffix = path.split('/')[-1]
-        all_latent_params = np.load(os.path.join(path, '../{}_latent_vectors.npy'.format(path_suffix)))
+        latent_params_file = os.path.join(path, '../{}_latent_vectors.npy'.format(path_suffix))
+        if os.path.isfile(latent_params_file):
+            all_latent_params = np.load(latent_params_file)
+        else:
+            all_latent_params = np.zeros([n_files, 0])
         images = np.zeros((batch_size, 3, 64, 64), dtype='int32')
         latent_params = np.zeros((batch_size, all_latent_params.shape[1]), dtype=np.float32)
         files = range(n_files)
@@ -30,6 +34,12 @@ def load(batch_size, data_dir='/home/ishaan/data/imagenet64', shuffle=True):
     return (
         make_generator(data_dir+'/train', batch_size, shuffle),
         make_generator(data_dir+'/test', batch_size, shuffle)
+    )
+
+def load_single_set(batch_size, data_dir='/home/ishaan/data/imagenet64', shuffle=True):
+    return (
+        make_generator(data_dir, batch_size, shuffle),
+        None
     )
 
 if __name__ == '__main__':
