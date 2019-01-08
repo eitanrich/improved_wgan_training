@@ -24,8 +24,9 @@ DIM = 64 # Model dimensionality
 BATCH_SIZE = 50 # Batch size
 CRITIC_ITERS = 5 # For WGAN and WGAN-GP, number of critic iters per gen iter
 LAMBDA = 10 # Gradient penalty lambda hyperparameter
-ITERS = 20000 # How many generator iterations to train for
+ITERS = 10000 # How many generator iterations to train for
 OUTPUT_DIM = 784 # Number of pixels in MNIST (28*28)
+LATENT_DIM = 16
 
 lib.print_model_settings(locals().copy())
 
@@ -54,9 +55,9 @@ def LeakyReLULayer(name, n_in, n_out, inputs):
 
 def Generator(n_samples, noise=None):
     if noise is None:
-        noise = tf.random_normal([n_samples, 128])
+        noise = tf.random_normal([n_samples, LATENT_DIM])
 
-    output = lib.ops.linear.Linear('Generator.Input', 128, 4*4*4*DIM, noise)
+    output = lib.ops.linear.Linear('Generator.Input', LATENT_DIM, 4*4*4*DIM, noise)
     if MODE == 'wgan':
         output = lib.ops.batchnorm.Batchnorm('Generator.BN1', [0], output)
     output = tf.nn.relu(output)
@@ -188,7 +189,7 @@ elif MODE == 'dcgan':
     clip_disc_weights = None
 
 # For saving samples
-fixed_noise = tf.constant(np.random.normal(size=(128, 128)).astype('float32'))
+fixed_noise = tf.constant(np.random.normal(size=(128, LATENT_DIM)).astype('float32'))
 fixed_noise_samples = Generator(128, noise=fixed_noise)
 def generate_image(frame, true_dist):
     samples = session.run(fixed_noise_samples)
@@ -200,8 +201,9 @@ def generate_image(frame, true_dist):
 
 for digit in range(10):
     print '************* Training digit', digit
+    lib.plot.reset()
 
-    out_folder = 'per_class_models/digit_' + str(digit)
+    out_folder = 'per_class_models_latent_dim_'+str(LATENT_DIM)+'/digit_' + str(digit)
     if not os.path.isdir(out_folder):
         os.makedirs(out_folder)
 
