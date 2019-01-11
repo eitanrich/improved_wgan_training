@@ -21,7 +21,7 @@ import tflib.plot
 
 MODE = 'wgan-gp' # dcgan, wgan, or wgan-gp
 DIM = 64 # Model dimensionality
-BATCH_SIZE = 64 # Batch size
+BATCH_SIZE = 100 # Batch size
 CRITIC_ITERS = 5 # For WGAN and WGAN-GP, number of critic iters per gen iter
 LAMBDA = 10 # Gradient penalty lambda hyperparameter
 ITERS = 3000 # How many generator iterations to train for
@@ -125,8 +125,8 @@ for digit in range(10):
         session.run(tf.initialize_all_variables())
         saver.restore(session, tf.train.latest_checkpoint(snapshot_folder))
 
-        for idx in range(0, all_labels.size, BATCH_SIZE):
-            end_idx = min(idx+BATCH_SIZE, all_labels.size)
+        for idx in range(0, all_labels.size-BATCH_SIZE, BATCH_SIZE):
+            end_idx = idx+BATCH_SIZE
             print 'Processing images %d - %d' % (idx, end_idx-1)
             # Run Z optimization iterations...
             session.run(reset_optimizer_op)
@@ -136,10 +136,10 @@ for digit in range(10):
             reconstruction_errors[idx:end_idx, digit] = all_images[idx:end_idx] - session.run(generated_data)
             optimal_latents[idx:end_idx, digit] = session.run(latent_params)
             labels[idx:end_idx, digit] = all_labels[idx:end_idx]
-            if idx >= 100:
-                break
+            # if idx >= 2000:
+            #      break
 
 print 'saving results...'
-np.save('reconstruction_errors.npy', reconstruction_errors)
-np.save('estimated_posterior_latents.npy', optimal_latents)
-np.save('labels.npy', labels)
+np.save('reconstruction_errors_s13.npy', reconstruction_errors)
+np.save('estimated_posterior_latents_s13.npy', optimal_latents)
+np.save('labels_s13.npy', labels)
