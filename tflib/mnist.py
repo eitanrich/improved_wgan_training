@@ -5,7 +5,7 @@ import urllib
 import gzip
 import pickle
 
-def mnist_generator(data, batch_size, digits_filter, limit=None):
+def mnist_generator(data, batch_size, digits_filter, div_by=None):
     images, targets = data
 
     if digits_filter is not None:
@@ -17,8 +17,9 @@ def mnist_generator(data, batch_size, digits_filter, limit=None):
     numpy.random.shuffle(images)
     numpy.random.set_state(rng_state)
     numpy.random.shuffle(targets)
-    if limit is not None:
-        print("WARNING ONLY FIRST {} MNIST DIGITS".format(limit))
+    if div_by is not None:
+        limit = int(round(images.shape[0]/div_by))
+        print("WARNING ONLY 1/{} = {} MNIST DIGITS".format(div_by, limit))
         images = images.astype('float32')[:limit]
         targets = targets.astype('int32')[:limit]
 
@@ -37,7 +38,7 @@ def mnist_generator(data, batch_size, digits_filter, limit=None):
 
     return get_epoch
 
-def load(batch_size, test_batch_size, digits_filter=None):
+def load(batch_size, test_batch_size, digits_filter=None, div_by=None):
     filepath = '/tmp/mnist.pkl.gz'
     url = 'http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz'
 
@@ -49,9 +50,9 @@ def load(batch_size, test_batch_size, digits_filter=None):
         train_data, dev_data, test_data = pickle.load(f)
 
     return (
-        mnist_generator(train_data, batch_size, digits_filter),
-        mnist_generator(dev_data, test_batch_size, digits_filter),
-        mnist_generator(test_data, test_batch_size, digits_filter)
+        mnist_generator(train_data, batch_size, digits_filter, div_by),
+        mnist_generator(dev_data, test_batch_size, digits_filter, div_by),
+        mnist_generator(test_data, test_batch_size, digits_filter, div_by)
     )
 
 def load_now(digits_filter=None):

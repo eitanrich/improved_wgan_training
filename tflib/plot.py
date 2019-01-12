@@ -17,7 +17,7 @@ _iter = [0]
 def reset():
 	_since_beginning.clear()
 	_since_last_flush.clear()
-	_iter.clear()
+	_iter[:] = []
 	_iter.append(0)
 
 def tick():
