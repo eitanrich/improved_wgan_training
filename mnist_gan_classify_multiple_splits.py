@@ -80,6 +80,12 @@ def Generator(n_samples, noise=None):
 
     return tf.reshape(output, [-1, OUTPUT_DIM])
 
+sigma_x = 1.0
+
+def calc_log_prob(x_err, z):
+    return -1 * (np.sum(np.square(z), axis=2) + np.sum(np.square(x_err), axis=2) / (2.0 * sigma_x * sigma_x))
+
+
 print 'Trying to reconstruct with the different models:'
 
 # def ncc_loss(x, y):
@@ -90,56 +96,59 @@ print 'Trying to reconstruct with the different models:'
 train_data, dev_data, test_data = lib.mnist.load_now()
 all_images, all_labels = test_data
 
-
 num_samples = 10000     # MNIST Test size...
 reconstruction_errors = np.zeros([num_samples, 10, OUTPUT_DIM])
 # log_prob_x = np.zeros([num_samples, 10])
 optimal_latents = np.zeros([num_samples, 10, LATENT_DIM])
 labels = np.ones([num_samples, 10], dtype=int) * (-1)
 
-for digit in range(10):
-    print '************* Reconstructing with digit', digit
-    # train_gen, dev_gen, test_gen = lib.mnist.load(BATCH_SIZE, BATCH_SIZE)
+max_log_division = 5
+num_retries = 3
+accuracies = np.zeros([max_log_division, num_retries])
+for p in range(max_log_division):
+    for t in range(num_retries):
+        for digit in range(10):
+            print '************* Reconstructing with digit', digit
+            # train_gen, dev_gen, test_gen = lib.mnist.load(BATCH_SIZE, BATCH_SIZE)
 
-    # Train loop
-    with tf.Session() as session:
-        real_data = tf.placeholder(tf.float32, shape=[BATCH_SIZE, OUTPUT_DIM])
-        latent_params = tf.Variable(np.zeros([BATCH_SIZE, LATENT_DIM]), dtype=tf.float32)
-        generated_data = Generator(BATCH_SIZE, noise=latent_params)
-        # reconstruction_loss = tf.losses.absolute_difference(real_data, generated_data)
+            # Train loop
+            with tf.Session() as session:
+                real_data = tf.placeholder(tf.float32, shape=[BATCH_SIZE, OUTPUT_DIM])
+                latent_params = tf.Variable(np.zeros([BATCH_SIZE, LATENT_DIM]), dtype=tf.float32)
+                generated_data = Generator(BATCH_SIZE, noise=latent_params)
+                # reconstruction_loss = tf.losses.absolute_difference(real_data, generated_data)
 
-        def calc_log_likelihood_x_loss(x, x_hat, z):
-            sigma_x = 1.0
-            return tf.reduce_sum(tf.square(z)) + tf.reduce_sum(tf.square(x-x_hat)) / (2.0 * sigma_x * sigma_x)
+                def calc_log_likelihood_x_loss(x, x_hat, z):
+                    return tf.reduce_sum(tf.square(z)) + tf.reduce_sum(tf.square(x-x_hat)) / (2.0 * sigma_x * sigma_x)
 
-        log_likelihood_x_loss = calc_log_likelihood_x_loss(real_data, generated_data, latent_params)
-        generator_inverse_optimizer = tf.train.AdamOptimizer(learning_rate=0.005, name='Optimizer')
-        # generator_inverse_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.005, name='Optimizer')
-        generator_inverse_op = generator_inverse_optimizer.minimize(log_likelihood_x_loss, var_list=[latent_params])
-        reset_optimizer_op = tf.variables_initializer(generator_inverse_optimizer.variables())
+                log_likelihood_x_loss = calc_log_likelihood_x_loss(real_data, generated_data, latent_params)
+                generator_inverse_optimizer = tf.train.AdamOptimizer(learning_rate=0.005, name='Optimizer')
+                # generator_inverse_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.005, name='Optimizer')
+                generator_inverse_op = generator_inverse_optimizer.minimize(log_likelihood_x_loss, var_list=[latent_params])
+                reset_optimizer_op = tf.variables_initializer(generator_inverse_optimizer.variables())
 
-        gen_params = lib.params_with_name('Generator')
-        saver = tf.train.Saver(var_list=gen_params)
-        snapshot_folder = './per_class_models_latent_dim_'+str(LATENT_DIM)+'/digit_' + str(digit) + '/model'
+                gen_params = lib.params_with_name('Generator')
+                saver = tf.train.Saver(var_list=gen_params)
+                snapshot_folder = 'mnist_splits/model_{}d_{}p_{}t/model'.format(digit, p, t)
 
-        session.run(tf.initialize_all_variables())
-        saver.restore(session, tf.train.latest_checkpoint(snapshot_folder))
+                session.run(tf.initialize_all_variables())
+                saver.restore(session, tf.train.latest_checkpoint(snapshot_folder))
 
-        for idx in range(0, all_labels.size-BATCH_SIZE, BATCH_SIZE):
-            end_idx = idx+BATCH_SIZE
-            print 'Processing images %d - %d' % (idx, end_idx-1)
-            # Run Z optimization iterations...
-            session.run(reset_optimizer_op)
-            for iteration in xrange(ITERS):
-                z_estimated, _loss, _ = session.run([latent_params, log_likelihood_x_loss, generator_inverse_op],
-                                                                   feed_dict={real_data: all_images[idx:end_idx]})
-            reconstruction_errors[idx:end_idx, digit] = all_images[idx:end_idx] - session.run(generated_data)
-            optimal_latents[idx:end_idx, digit] = session.run(latent_params)
-            labels[idx:end_idx, digit] = all_labels[idx:end_idx]
-            # if idx >= 2000:
-            #      break
+                for idx in range(0, num_samples-BATCH_SIZE+1, BATCH_SIZE):
+                    end_idx = idx+BATCH_SIZE
+                    print 'Processing images %d - %d' % (idx, end_idx-1)
+                    # Run Z optimization iterations...
+                    session.run(reset_optimizer_op)
+                    for iteration in xrange(ITERS):
+                        z_estimated, _loss, _ = session.run([latent_params, log_likelihood_x_loss, generator_inverse_op],
+                                                                           feed_dict={real_data: all_images[idx:end_idx]})
+                    reconstruction_errors[idx:end_idx, digit] = all_images[idx:end_idx] - session.run(generated_data)
+                    optimal_latents[idx:end_idx, digit] = session.run(latent_params)
+                    labels[idx:end_idx, digit] = all_labels[idx:end_idx]
+            # Classify...
+        log_probs = calc_log_prob(reconstruction_errors, optimal_latents)
+        predictions = np.argmax(log_probs, axis=1)
+        accuracies[p, t] = (np.sum(predictions[:num_samples] == labels[:num_samples, 0]))/float(num_samples)
+        np.save('mnist_splits/accuracies.npy', accuracies)
+print 'Done.'
 
-print 'saving results...'
-np.save('reconstruction_errors_s13.npy', reconstruction_errors)
-np.save('estimated_posterior_latents_s13.npy', optimal_latents)
-np.save('labels_s13.npy', labels)

@@ -90,7 +90,6 @@ print 'Trying to reconstruct with the different models:'
 train_data, dev_data, test_data = lib.mnist.load_now()
 all_images, all_labels = test_data
 
-
 num_samples = 10000     # MNIST Test size...
 reconstruction_errors = np.zeros([num_samples, 10, OUTPUT_DIM])
 # log_prob_x = np.zeros([num_samples, 10])
